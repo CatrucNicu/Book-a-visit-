@@ -5,57 +5,51 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import { EventApi, EventInput } from "@fullcalendar/core";
-import BookingModal from "./BookingModal";
+import Modal from "react-modal";
+import BookingModal from "./BookingModal";  // presupun că e BookingModal.tsx, ajustază calea
 
-// ────────────────────────────────────────────────
-// Interfață unificată – id ca number pentru compatibilitate cu BookingModal
-// ────────────────────────────────────────────────
+// Interfață unificată
 export interface Booking {
-  id: number;
-  name: string | null;
-  phone: string | null;
-  date: string | null;
-  time: string | null;
-  status: "pending" | "done" | null;
-  dateTime: string | null;
+  id: string;
+  name?: string | null;
+  phone?: string | null;
+  date?: string | null;
+  time?: string | null;
+  status?: "pending" | "done" | null;
+  dateTime?: string | null;
 }
 
 export default function BookingCalendar() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);  // control modal
 
   const fetchBookings = async () => {
     try {
       const res = await fetch("/api/bookings");
-      if (!res.ok) {
-        console.error("Fetch failed:", res.status, res.statusText);
-        return;
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const rawData = await res.json();
-      
-      // Keep id as number for FullCalendar compatibility
       const normalized = rawData.map((item: any) => ({
         ...item,
+        id: String(item.id),
       })) as Booking[];
-
       setBookings(normalized);
     } catch (err) {
-      console.error("Fetch bookings error:", err);
+      console.error("Fetch error:", err);
     }
   };
 
   useEffect(() => {
-    fetchBookings();
-  }, []);
+    if (isModalOpen) {
+      fetchBookings();
+    }
+  }, [isModalOpen]);
 
   const handleEventClick = (info: { event: EventApi }) => {
     const eventId = info.event.id;
     if (!eventId) return;
-
-    const booking = bookings.find(b => String(b.id) === eventId);
-    if (booking) {
-      setSelectedBooking(booking);
-    }
+    const booking = bookings.find(b => b.id === eventId);
+    if (booking) setSelectedBooking(booking);
   };
 
   const handleEventDrop = async (info: { event: EventApi; revert: () => void }) => {
@@ -64,14 +58,12 @@ export default function BookingCalendar() {
 
     if (!eventId || !newStart) {
       info.revert();
-      alert("Date sau eveniment invalid");
       return;
     }
 
     const idNumber = Number(eventId);
-    if (Number.isNaN(idNumber)) {
+    if (isNaN(idNumber)) {
       info.revert();
-      alert("ID invalid");
       return;
     }
 
@@ -81,99 +73,94 @@ export default function BookingCalendar() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dateTime: newStart.toISOString() }),
       });
-
-      if (!res.ok) {
-        let errorMsg = "";
-        try {
-          const errBody = await res.json();
-          errorMsg = errBody.error || `HTTP ${res.status}`;
-        } catch {
-          errorMsg = `HTTP ${res.status}`;
-        }
-        throw new Error(errorMsg);
-      }
-
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.success) {
-        await fetchBookings();
+        fetchBookings();
       } else {
         info.revert();
-        alert(data.error || "Actualizarea a eșuat");
       }
-    } catch (err: any) {
+    } catch (err) {
       info.revert();
-      console.error("Eroare la mutare:", err);
-      alert(`Eroare la mutare: ${err.message || "eroare necunoscută"}`);
+      console.error(err);
     }
   };
 
-const events: EventInput[] = bookings
-  .filter(b => b.id != null)
-  .map((b) => {
-    let start: Date | null = null;
+  const events: EventInput[] = bookings
+    .map((b) => {
+      let start: Date | null = null;
 
-    // 1. Prioritate: dateTime dacă există
-    if (b.dateTime) {
-      let dt = b.dateTime.trim();
-
-      // Corecție rapidă pentru formatul greșit ":00:00"
-      if (dt.endsWith(':00:00')) {
-        dt = dt.replace(/:00:00$/, ':00');
+      if (b.dateTime) {
+        start = new Date(b.dateTime);
+      } else if (b.date && b.time) {
+        let time = b.time.trim();
+        if (time.length === 5) time += ':00';
+        const combined = `${b.date}T${time}`;
+        start = new Date(combined);
       }
 
-      start = new Date(dt);
-      console.log(`[PARSE dateTime] id ${b.id}: ${dt} → ${start.toISOString() || 'INVALID'}`);
-    }
+      if (!start || isNaN(start.getTime())) return null;
 
-    // 2. Fallback: date + time
-    else if (b.date && b.time) {
-      let t = b.time.trim();
-
-      // Normalizare time
-      if (t.length === 5 && t.includes(':')) t += ':00';
-      if (t.endsWith(':00:00')) t = t.replace(/:00:00$/, ':00');
-
-      const combined = `${b.date}T${t}`;
-      start = new Date(combined);
-      console.log(`[PARSE date+time] id ${b.id}: ${combined} → ${start.toISOString() || 'INVALID'}`);
-    }
-
-    if (!start || isNaN(start.getTime())) {
-      console.warn(`[INVALID] id ${b.id} – dateTime: ${b.dateTime}, date: ${b.date}, time: ${b.time}`);
-      return null;
-    }
-
-    return {
-      id: String(b.id),
-      title: b.name || "Rezervare",
-      start,
-      allDay: false,
-      color: b.status === "done" ? "#22c55e" : "#3b82f6",
-    };
-  })
-  .filter((e): e is EventInput => !!e);
+      return {
+        id: b.id,
+        title: b.name || "Rezervare",
+        start,
+        allDay: false,
+        color: b.status === "done" ? "#22c55e" : "#3b82f6",
+      };
+    })
+    .filter((e): e is EventInput => !!e);
 
   return (
     <div>
-      <FullCalendar
-        plugins={[dayGridPlugin, interactionPlugin]}
-        initialView="dayGridMonth"
-        editable={true}
-        events={events}
-        eventClick={handleEventClick}
-        eventDrop={handleEventDrop}
-        eventResizableFromStart={false}
-        droppable={true}
-        height="auto"
-      />
+      <button
+        onClick={() => setIsModalOpen(true)}
+        className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+      >
+        Deschide Calendar Rezervări
+      </button>
 
-      {selectedBooking && (
-        <BookingModal
-          booking={selectedBooking}
-          onClose={() => setSelectedBooking(null)}
-          onUpdate={fetchBookings}
+      <Modal
+        isOpen={isModalOpen}
+        onRequestClose={() => setIsModalOpen(false)}
+        style={{
+          content: {
+            top: '50%',
+            left: '50%',
+            right: 'auto',
+            bottom: 'auto',
+            marginRight: '-50%',
+            transform: 'translate(-50%, -50%)',
+            width: '80%',
+            height: '80%',
+          },
+        }}
+        contentLabel="Calendar Modal"
+      >
+        <button
+          onClick={() => setIsModalOpen(false)}
+          className="absolute top-2 right-2 text-gray-600 hover:text-gray-900"
+        >
+          ×
+        </button>
+
+        <FullCalendar
+          plugins={[dayGridPlugin, interactionPlugin]}
+          initialView="dayGridMonth"
+          editable={true}
+          events={events}
+          eventClick={handleEventClick}
+          eventDrop={handleEventDrop}
         />
-      )}
+
+        {selectedBooking && (
+          <BookingModal
+            booking={selectedBooking}
+            onClose={() => setSelectedBooking(null)}
+            onUpdate={fetchBookings}
+          />
+        )}
+      </Modal>
     </div>
   );
 }

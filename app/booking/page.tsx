@@ -15,7 +15,7 @@ export default function BookingPage() {
         playsInline
         className="absolute top-0 left-0 w-full h-full object-cover z-0 pointer-events-none"
       >
-        <source src="/Video/hero.mp4" type="video/mp4" />
+        <source src="/hero.mp4" type="video/mp4" />
       </video>
 
       {/* Optional Overlay */}
